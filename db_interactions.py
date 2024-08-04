@@ -43,14 +43,9 @@ class DBInteraction:
         except sqlite3.Error as e:
             print(f"remove_item ошибка: {e}")
     
-    def change_name(self, table_name, id):
-        """Поменять имя элемента в таблице"""
-        pass
-    
-    def change_quantity(self, table_name, id):
+    def change_quantity(self, new_quantity, id):
         """Изменить кол-во элемента в таблице"""
-        pass
+        update_query = """UPDATE items SET quantity = ? where id = ?"""
+        self.cursor.execute(update_query, (new_quantity, id,))
+        self.connection.commit()
     
-    def change_photo(self, table_name, id):
-        """Поменять фото"""
-        pass
