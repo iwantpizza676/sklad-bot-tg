@@ -134,7 +134,7 @@ async def remove_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def get_all_items_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         response = DBInteraction.get_all_items(table_name)
-        await update.message.reply_text("Список всех предметов: \n" + str(response))
+        await update.message.reply_text("Список всех предметов\n[id] название - кол-во: \n\n" + format_data(response))
     except Exception as e:
         await update.message.reply_text(f"Ошибка при попытке получить данные из таблицы: {e}")
 
@@ -152,6 +152,19 @@ async def change_item_quantity_command(update: Update, context: ContextTypes.DEF
     except Exception as e:
         await update.message.reply_text(f"Ошибка при изменении количества: {e}", reply_markup=await start_keyboard())
         return ConversationHandler.END
+
+
+def format_data(data):
+    formatted_data = [
+        {'id': item[0], 'name': item[1], 'quantity': item[2]} for item in data
+    ]
+
+    formatted_strings = [
+        f"[ {item['id']} ] {item['name']} - {item['quantity']} шт"
+        for item in formatted_data
+    ]
+
+    return '\n'.join(formatted_strings)
     
     
 if __name__ == '__main__':
