@@ -16,6 +16,11 @@ table_name = 'items'
 # Состояния (states)
 ADD_ITEM, TYPING_NAME, TYPING_QUANTITY, TYPING_PHOTO_URL, DELETE_ITEM, TYPING_ITEM_ID, CHANGE_QUANTITY, TYPING_NEW_QUANTITY = range(8)
 
+# Папка для фотографий
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PHOTO_DIR = os.path.join(BASE_DIR, 'photos')
+os.makedirs(PHOTO_DIR, exist_ok=True)  # Создаем папку для фото, если ее нет
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text('Выберите действие:', reply_markup=await start_keyboard())
@@ -50,21 +55,34 @@ async def add_item_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_item_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text == "Назад":  # Проверяем, нажата ли кнопка "Назад"
+    if update.message.text == "Назад":
         await update.message.reply_text("Действие отменено", reply_markup=await start_keyboard())
         return ConversationHandler.END
     context.user_data['quantity'] = update.message.text
-    await update.message.reply_text("Введите ссылку на фото:", reply_markup=back_keyboard())
-    return TYPING_PHOTO_URL
+    await update.message.reply_text("Загрузите фотографию:", reply_markup=back_keyboard())  # Изменено сообщение
+    return TYPING_PHOTO_URL  # Переходим к ожиданию фотографии, не завершая состояние
 
 
 async def add_item_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text == "Назад":  # Проверяем, нажата ли кнопка "Назад"
+    if update.message.text == "Назад":
         await update.message.reply_text("Действие отменено", reply_markup=await start_keyboard())
         return ConversationHandler.END
-    context.user_data['photo'] = update.message.text
-    await add_item_command(update, context)
-    return ConversationHandler.END
+
+    if update.message.photo:
+        photo_file = await update.message.photo[-1].get_file()
+        filename = f"photo_{update.message.message_id}.jpg"
+        photo_path = os.path.join(PHOTO_DIR, filename)
+        await photo_file.download_to_drive(photo_path)
+
+        # Генерируем относительную ссылку на фото
+        photo_url = f"/photos/{filename}"
+
+        context.user_data['photo'] = photo_url  # Сохраняем ссылку в user_data
+        await add_item_command(update, context)
+        return ConversationHandler.END
+    else:
+        await update.message.reply_text("Пожалуйста, загрузите фотографию.", reply_markup=back_keyboard())
+        return TYPING_PHOTO_URL  # Остаемся в том же состоянии, если фото не загружено
 
 
 async def delete_item_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -98,10 +116,15 @@ async def change_item_quantity(update: Update, context: ContextTypes.DEFAULT_TYP
     
 async def add_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        DBInteraction.add_item(context.user_data['name'], context.user_data['quantity'], context.user_data['photo'])
+        DBInteraction.add_item(
+            context.user_data['name'],
+            context.user_data['quantity'],
+            context.user_data['photo']
+        )
         await update.message.reply_text("Предмет успешно добавлен", reply_markup=await start_keyboard())
     except Exception as e:
         await update.message.reply_text(f"Произошла непредвиденная ошибка: {e}", reply_markup=await start_keyboard())
+
 
 
 async def start_keyboard():
@@ -178,7 +201,10 @@ if __name__ == '__main__':
         states={
             TYPING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_item_name)],
             TYPING_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_item_quantity)],
-            TYPING_PHOTO_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_item_photo)],
+            TYPING_PHOTO_URL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_item_photo),  # Обработчик текста
+                MessageHandler(filters.PHOTO, add_item_photo)  # Обработчик фотографий
+            ],
             TYPING_ITEM_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, delete_item_id)],
             CHANGE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_item_quantity)],
             TYPING_NEW_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_item_quantity_command)]
