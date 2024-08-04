@@ -48,4 +48,10 @@ class DBInteraction:
         update_query = """UPDATE items SET quantity = ? where id = ?"""
         self.cursor.execute(update_query, (new_quantity, id,))
         self.connection.commit()
+        
+    def get_item_by_id(self, id):
+        """Получить все поля элемента в таблице"""
+        get_query = """SELECT * FROM items WHERE id = ?"""
+        details = self.cursor.execute(get_query, (id,))
+        return details.fetchall()
     

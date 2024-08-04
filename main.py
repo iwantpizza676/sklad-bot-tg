@@ -14,7 +14,7 @@ DBInteraction = DBInteraction('sklad.db')
 table_name = 'items'
 
 # Состояния (states)
-ADD_ITEM, TYPING_NAME, TYPING_QUANTITY, TYPING_PHOTO_URL, DELETE_ITEM, TYPING_ITEM_ID, CHANGE_QUANTITY, TYPING_NEW_QUANTITY = range(8)
+ADD_ITEM, TYPING_NAME, TYPING_QUANTITY, TYPING_PHOTO_URL, DELETE_ITEM, TYPING_ITEM_ID, CHANGE_QUANTITY, TYPING_NEW_QUANTITY, SHOW_ALL_ITEMS, GET_ITEM_DETAILS = range(10)
 
 # Папка для фотографий
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +37,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return TYPING_ITEM_ID
     elif text == "Показать все предметы":
         await get_all_items_command(update, context)
+        return SHOW_ALL_ITEMS 
     elif text == "Изменить кол-во предмета":  # Новая кнопка
         await update.message.reply_text("Введите ID предмета:", reply_markup=back_keyboard())
         return CHANGE_QUANTITY  # Переходим в состояние изменения количества
@@ -75,7 +76,7 @@ async def add_item_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await photo_file.download_to_drive(photo_path)
 
         # Генерируем относительную ссылку на фото
-        photo_url = f"/photos/{filename}"
+        photo_url = f"photos/{filename}"
 
         context.user_data['photo'] = photo_url  # Сохраняем ссылку в user_data
         await add_item_command(update, context)
@@ -126,7 +127,6 @@ async def add_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Произошла непредвиденная ошибка: {e}", reply_markup=await start_keyboard())
 
 
-
 async def start_keyboard():
     keyboard = [
         [KeyboardButton("Добавить предмет"), KeyboardButton("Изменить кол-во предмета")],  # Добавлена кнопка
@@ -138,6 +138,14 @@ async def start_keyboard():
 
 def back_keyboard():
     keyboard = [[KeyboardButton("Назад")]]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+
+async def details_keyboard():
+    keyboard = [
+        [KeyboardButton("Подробнее")],
+        [KeyboardButton("Назад")]
+    ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
@@ -157,9 +165,56 @@ async def remove_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def get_all_items_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         response = DBInteraction.get_all_items(table_name)
-        await update.message.reply_text("Список всех предметов\n[id] название - кол-во: \n\n" + format_data(response))
+        await update.message.reply_text(
+            "Список всех предметов\n[id] название - кол-во: \n\n" + format_data(response),
+            reply_markup=await details_keyboard()  # Меняем клавиатуру
+        )
     except Exception as e:
         await update.message.reply_text(f"Ошибка при попытке получить данные из таблицы: {e}")
+
+
+async def handle_show_all_items(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == "Подробнее":
+        await update.message.reply_text("Введите ID предмета:", reply_markup=back_keyboard())
+        return GET_ITEM_DETAILS
+    elif text == "Назад":
+        await update.message.reply_text("Действие отменено", reply_markup=await start_keyboard())
+        return ConversationHandler.END
+
+
+async def get_item_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == "Назад":
+        await update.message.reply_text("Действие отменено", reply_markup=await start_keyboard())
+        return ConversationHandler.END
+
+    try:
+        item_id = int(update.message.text)
+        item_details = DBInteraction.get_item_by_id(item_id)
+        if item_details:
+            item = item_details[0]
+
+            # Форматируем текстовую информацию
+            caption = f"""
+Id - {item[0]}
+{item[1]}
+Кол-во - {item[2]}
+"""
+
+            # Отправляем фото с подписью
+            await context.bot.send_photo(
+                chat_id=update.effective_chat.id,
+                photo=open(os.path.join(item[3]), 'rb'),
+                caption=caption,
+                reply_markup=await start_keyboard()
+            )
+        else:
+            await update.message.reply_text("Предмет с таким ID не найден.", reply_markup=await start_keyboard())
+        return ConversationHandler.END
+    except ValueError:
+        await update.message.reply_text("Неверный формат ID. Пожалуйста, введите число.", reply_markup=back_keyboard())
+        return GET_ITEM_DETAILS
+
 
 
 async def change_item_quantity_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -188,8 +243,8 @@ def format_data(data):
     ]
 
     return '\n'.join(formatted_strings)
-    
-    
+
+
 if __name__ == '__main__':
     print('Starting bot...')
     app = Application.builder().token(TELEGRAM_HTTP_API_TOKEN).build()
@@ -207,7 +262,9 @@ if __name__ == '__main__':
             ],
             TYPING_ITEM_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, delete_item_id)],
             CHANGE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_item_quantity)],
-            TYPING_NEW_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_item_quantity_command)]
+            TYPING_NEW_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_item_quantity_command)],
+            SHOW_ALL_ITEMS: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_show_all_items)],
+            GET_ITEM_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_item_details)]
         },
         fallbacks=[CommandHandler('cancel', cancel)]
     )
