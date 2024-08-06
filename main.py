@@ -1,25 +1,25 @@
 import os
 import dotenv
 from db_interactions import DBInteraction
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters, ConversationHandler
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, ConversationHandler
 
-# Загружем переменные среды
+# Load api keys
 dotenv.load_dotenv(override=True)
 TELEGRAM_HTTP_API_TOKEN = os.getenv('TELEGRAM_HTTP_API_TOKEN')
 BOT_USERNAME = os.getenv('BOT_USERNAME')
 
-# Создаем объект взаимодействия с базой данных
+# Database interaction object
 DBInteraction = DBInteraction('sklad.db')
 table_name = 'items'
 
-# Состояния (states)
+# States
 ADD_ITEM, TYPING_NAME, TYPING_QUANTITY, TYPING_PHOTO_URL, DELETE_ITEM, TYPING_ITEM_ID, CHANGE_QUANTITY, TYPING_NEW_QUANTITY, SHOW_ALL_ITEMS, GET_ITEM_DETAILS, ISSUE_ITEM, TYPING_ISSUE_ITEM_ID, CHOOSE_ISSUE_QUANTITY = range(13)
 
-# Папка для фотографий
+# Create a photo folder
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PHOTO_DIR = os.path.join(BASE_DIR, 'photos')
-os.makedirs(PHOTO_DIR, exist_ok=True)  # Создаем папку для фото, если ее нет
+os.makedirs(PHOTO_DIR, exist_ok=True)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -38,9 +38,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "Показать все предметы":
         await get_all_items_command(update, context)
         return SHOW_ALL_ITEMS 
-    elif text == "Изменить кол-во предмета":  # Новая кнопка
+    elif text == "Изменить кол-во предмета":
         await update.message.reply_text("Введите ID предмета:", reply_markup=back_keyboard())
-        return CHANGE_QUANTITY  # Переходим в состояние изменения количества
+        return CHANGE_QUANTITY 
     elif text == "Выдать товар":  # Новая кнопка
         await update.message.reply_text("Введите ID предмета:", reply_markup=back_keyboard())
         return ISSUE_ITEM
@@ -50,7 +50,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_item_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text == "Назад":  # Проверяем, нажата ли кнопка "Назад"
+    if update.message.text == "Назад":
         await update.message.reply_text("Действие отменено", reply_markup=await start_keyboard())
         return ConversationHandler.END
     context.user_data['name'] = update.message.text
@@ -63,8 +63,8 @@ async def add_item_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Действие отменено", reply_markup=await start_keyboard())
         return ConversationHandler.END
     context.user_data['quantity'] = update.message.text
-    await update.message.reply_text("Загрузите фотографию:", reply_markup=back_keyboard())  # Изменено сообщение
-    return TYPING_PHOTO_URL  # Переходим к ожиданию фотографии, не завершая состояние
+    await update.message.reply_text("Загрузите фотографию:", reply_markup=back_keyboard())
+    return TYPING_PHOTO_URL  # Go to waiting for photo without closing the state
 
 
 async def add_item_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -78,15 +78,15 @@ async def add_item_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo_path = os.path.join(PHOTO_DIR, filename)
         await photo_file.download_to_drive(photo_path)
 
-        # Генерируем относительную ссылку на фото
+        # Create relative link to the photo
         photo_url = f"photos/{filename}"
 
-        context.user_data['photo'] = photo_url  # Сохраняем ссылку в user_data
+        context.user_data['photo'] = photo_url  # Save url to user_data
         await add_item_command(update, context)
         return ConversationHandler.END
     else:
         await update.message.reply_text("Пожалуйста, загрузите фотографию.", reply_markup=back_keyboard())
-        return TYPING_PHOTO_URL  # Остаемся в том же состоянии, если фото не загружено
+        return TYPING_PHOTO_URL  # Remain in the same state if no photo is uploaded
 
 
 async def delete_item_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -96,7 +96,8 @@ async def delete_item_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         item_id = int(update.message.text)
-        await remove_item_command(update, context, item_id)  # Передаем item_id в remove_item_command
+        # item_id -> remove_item_command
+        await remove_item_command(update, context, item_id)
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text("Неверный формат ID. Пожалуйста, введите число.", reply_markup=back_keyboard())
@@ -114,7 +115,7 @@ async def issue_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if item_details:
             item = item_details[0]
 
-            # Отправляем фото с подписью (информация о предмете)
+            # Format output (photo with caption)
             caption = f"""
 Id - {item[0]}
 {item[1]}
@@ -131,7 +132,7 @@ Id - {item[0]}
             return CHOOSE_ISSUE_QUANTITY
         else:
             await update.message.reply_text("Предмет с таким ID не найден.", reply_markup=back_keyboard())
-            return ISSUE_ITEM  # Остаемся в состоянии ввода ID, если предмет не найден
+            return ISSUE_ITEM  # Remain in the ID entry state if the item is not found
     except ValueError:
         await update.message.reply_text("Неверный формат ID. Пожалуйста, введите число.", reply_markup=back_keyboard())
         return ISSUE_ITEM
@@ -161,7 +162,7 @@ async def handle_choose_issue_quantity(update: Update, context: ContextTypes.DEF
                     f"Недостаточно товара на складе. Текущее количество: {current_quantity}",
                     reply_markup=await start_keyboard()
                 )
-            return ConversationHandler.END  # Добавлено для завершения диалога после выдачи или ошибки
+            return ConversationHandler.END # To end dialogue after error 
         except ValueError:
             await update.message.reply_text("Неверный формат количества. Пожалуйста, введите число.", reply_markup=back_keyboard())
             return CHOOSE_ISSUE_QUANTITY
@@ -234,7 +235,7 @@ async def get_all_items_command(update: Update, context: ContextTypes.DEFAULT_TY
         response = DBInteraction.get_all_items(table_name)
         await update.message.reply_text(
             "Список всех предметов\n[id] название - кол-во: \n\n" + format_data(response),
-            reply_markup=await details_keyboard()  # Меняем клавиатуру
+            reply_markup=await details_keyboard()
         )
     except Exception as e:
         await update.message.reply_text(f"Ошибка при попытке получить данные из таблицы: {e}")
@@ -261,14 +262,12 @@ async def get_item_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if item_details:
             item = item_details[0]
 
-            # Форматируем текстовую информацию
             caption = f"""
 Id - {item[0]}
 {item[1]}
 Кол-во - {item[2]}
 """
 
-            # Отправляем фото с подписью
             await context.bot.send_photo(
                 chat_id=update.effective_chat.id,
                 photo=open(os.path.join(item[3]), 'rb'),
@@ -328,7 +327,8 @@ if __name__ == '__main__':
     print('Starting bot...')
     app = Application.builder().token(TELEGRAM_HTTP_API_TOKEN).build()
 
-    app.add_handler(CommandHandler('start', start))  # Добавляем обработчик команды /start
+    # Start command handler
+    app.add_handler(CommandHandler('start', start))
 
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)],
@@ -336,8 +336,8 @@ if __name__ == '__main__':
             TYPING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_item_name)],
             TYPING_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_item_quantity)],
             TYPING_PHOTO_URL: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, add_item_photo),  # Обработчик текста
-                MessageHandler(filters.PHOTO, add_item_photo)  # Обработчик фотографий
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_item_photo),
+                MessageHandler(filters.PHOTO, add_item_photo) 
             ],
             TYPING_ITEM_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, delete_item_id)],
             CHANGE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_item_quantity)],
@@ -349,10 +349,10 @@ if __name__ == '__main__':
         },
         fallbacks=[CommandHandler('cancel', cancel)]
     )
-
-    app.add_handler(conv_handler)  # Добавляем обработчик диалога после обработчика команды /start
+    
+    app.add_handler(conv_handler)
 
     print('Polling...')
-    app.run_polling(poll_interval=3)
+    app.run_polling(poll_interval=1)
     
     
