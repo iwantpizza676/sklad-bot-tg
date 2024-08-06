@@ -14,7 +14,7 @@ DBInteraction = DBInteraction('sklad.db')
 table_name = 'items'
 
 # Состояния (states)
-ADD_ITEM, TYPING_NAME, TYPING_QUANTITY, TYPING_PHOTO_URL, DELETE_ITEM, TYPING_ITEM_ID, CHANGE_QUANTITY, TYPING_NEW_QUANTITY, SHOW_ALL_ITEMS, GET_ITEM_DETAILS = range(10)
+ADD_ITEM, TYPING_NAME, TYPING_QUANTITY, TYPING_PHOTO_URL, DELETE_ITEM, TYPING_ITEM_ID, CHANGE_QUANTITY, TYPING_NEW_QUANTITY, SHOW_ALL_ITEMS, GET_ITEM_DETAILS, ISSUE_ITEM, TYPING_ISSUE_ITEM_ID, CHOOSE_ISSUE_QUANTITY = range(13)
 
 # Папка для фотографий
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,6 +41,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "Изменить кол-во предмета":  # Новая кнопка
         await update.message.reply_text("Введите ID предмета:", reply_markup=back_keyboard())
         return CHANGE_QUANTITY  # Переходим в состояние изменения количества
+    elif text == "Выдать товар":  # Новая кнопка
+        await update.message.reply_text("Введите ID предмета:", reply_markup=back_keyboard())
+        return ISSUE_ITEM
     elif text == "Назад":
         await update.message.reply_text("Действие отменено", reply_markup=await start_keyboard())
         return ConversationHandler.END
@@ -100,6 +103,70 @@ async def delete_item_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return TYPING_ITEM_ID
 
 
+async def issue_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == "Назад":
+        await update.message.reply_text("Действие отменено", reply_markup=await start_keyboard())
+        return ConversationHandler.END
+
+    try:
+        item_id = int(update.message.text)
+        item_details = DBInteraction.get_item_by_id(item_id)
+        if item_details:
+            item = item_details[0]
+
+            # Отправляем фото с подписью (информация о предмете)
+            caption = f"""
+Id - {item[0]}
+{item[1]}
+Кол-во - {item[2]}
+"""
+            await context.bot.send_photo(
+                chat_id=update.effective_chat.id,
+                photo=open(os.path.join(BASE_DIR, item[3]), 'rb'),
+                caption=caption
+            )
+
+            context.user_data['item_id'] = item_id
+            await update.message.reply_text("Выберите количество для выдачи:", reply_markup=await issue_quantity_keyboard())
+            return CHOOSE_ISSUE_QUANTITY
+        else:
+            await update.message.reply_text("Предмет с таким ID не найден.", reply_markup=back_keyboard())
+            return ISSUE_ITEM  # Остаемся в состоянии ввода ID, если предмет не найден
+    except ValueError:
+        await update.message.reply_text("Неверный формат ID. Пожалуйста, введите число.", reply_markup=back_keyboard())
+        return ISSUE_ITEM
+
+
+async def handle_choose_issue_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    item_id = context.user_data['item_id']
+
+    if text == "Назад":
+        await update.message.reply_text("Действие отменено", reply_markup=await start_keyboard())
+        return ConversationHandler.END
+    elif text == "Свое кол-во":
+        await update.message.reply_text("Введите количество для выдачи:", reply_markup=back_keyboard())
+        return TYPING_NEW_QUANTITY
+    else:
+        try:
+            quantity_to_issue = int(text)
+            item_details = DBInteraction.get_item_by_id(item_id)[0]
+            current_quantity = item_details[2]
+
+            if current_quantity >= quantity_to_issue:
+                new_quantity = current_quantity - quantity_to_issue
+                await change_item_quantity_command(update, context, new_quantity)
+            else:
+                await update.message.reply_text(
+                    f"Недостаточно товара на складе. Текущее количество: {current_quantity}",
+                    reply_markup=await start_keyboard()
+                )
+            return ConversationHandler.END  # Добавлено для завершения диалога после выдачи или ошибки
+        except ValueError:
+            await update.message.reply_text("Неверный формат количества. Пожалуйста, введите число.", reply_markup=back_keyboard())
+            return CHOOSE_ISSUE_QUANTITY
+        
+
 async def change_item_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "Назад":
         await update.message.reply_text("Действие отменено", reply_markup=await start_keyboard())
@@ -129,8 +196,8 @@ async def add_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_keyboard():
     keyboard = [
-        [KeyboardButton("Добавить предмет"), KeyboardButton("Изменить кол-во предмета")],  # Добавлена кнопка
-        [KeyboardButton("Удалить предмет")],
+        [KeyboardButton("Добавить предмет"), KeyboardButton("Изменить кол-во предмета")],
+        [KeyboardButton("Удалить предмет"), KeyboardButton("Выдать товар")],  # Добавлена кнопка
         [KeyboardButton("Показать все предметы")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -216,13 +283,16 @@ Id - {item[0]}
         return GET_ITEM_DETAILS
 
 
-
-async def change_item_quantity_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def change_item_quantity_command(update: Update, context: ContextTypes.DEFAULT_TYPE, new_quantity=None):
     try:
-        new_quantity = int(update.message.text)
+        if new_quantity is None:
+            new_quantity = int(update.message.text)
         item_id = context.user_data['item_id']
         DBInteraction.change_quantity(new_quantity, item_id)
-        await update.message.reply_text(f"Количество предмета с ID {item_id} изменено на {new_quantity}", reply_markup=await start_keyboard())
+        await update.message.reply_text(
+            f"Количество предмета с ID {item_id} изменено на {new_quantity}",
+            reply_markup=await start_keyboard()
+        )
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text("Неверный формат количества. Пожалуйста, введите число.", reply_markup=back_keyboard())
@@ -245,6 +315,15 @@ def format_data(data):
     return '\n'.join(formatted_strings)
 
 
+async def issue_quantity_keyboard():
+    keyboard = [
+        [KeyboardButton("1"), KeyboardButton("2"), KeyboardButton("3")],
+        [KeyboardButton("5"), KeyboardButton("Свое кол-во")],
+        [KeyboardButton("Назад")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+
 if __name__ == '__main__':
     print('Starting bot...')
     app = Application.builder().token(TELEGRAM_HTTP_API_TOKEN).build()
@@ -264,7 +343,9 @@ if __name__ == '__main__':
             CHANGE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_item_quantity)],
             TYPING_NEW_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_item_quantity_command)],
             SHOW_ALL_ITEMS: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_show_all_items)],
-            GET_ITEM_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_item_details)]
+            GET_ITEM_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_item_details)],
+            ISSUE_ITEM: [MessageHandler(filters.TEXT & ~filters.COMMAND, issue_item)],
+            CHOOSE_ISSUE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_choose_issue_quantity)]
         },
         fallbacks=[CommandHandler('cancel', cancel)]
     )
